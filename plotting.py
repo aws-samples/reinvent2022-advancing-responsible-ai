@@ -1,6 +1,7 @@
 
 import torch.nn as nn
 import numpy as np
+from string import capwords
 from math import sqrt
 from random import choice
 import matplotlib.pyplot as plt
@@ -8,6 +9,7 @@ import matplotlib.ticker as ticker
 from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
 import pandas as pd
 from eval_utils import eval_model_on_groups
+
 
 def plot_dataset_digits(df, data_col='img', label_col='digit'):
     """
@@ -114,12 +116,10 @@ def plot_confusion_matrices(train_df, test_df, label_col, pred_col, dataset_name
     plt.show()
 
 
-
 def plot_confidence_intervals_train_and_test(train_dict_of_dfs,
                                               test_dict_of_dfs,
                                               group_name,
                                               dataset_name,
-                                              x_ticklabels=None,
                                               use_legend=True,
                                               figsize=(12, 6),
                                               fontsize=16,
@@ -130,11 +130,16 @@ def plot_confidence_intervals_train_and_test(train_dict_of_dfs,
 
     train_df = train_dict_of_dfs[group_name]
     train_ci_dict = compute_wald_intervals(train_df)
+    train_data_sorted = sorted(train_ci_dict.items(), key=lambda x: x[1][0][0])
 
     n_groups = len(train_ci_dict)
 
     test_df = test_dict_of_dfs[group_name]
     test_ci_dict = compute_wald_intervals(test_df)
+    test_data_sorted = sorted(test_ci_dict.items(), key=lambda x: x[1][0][0])
+
+    # Get the tick labels
+    x_ticklabels = [entry[0] for entry in train_data_sorted]
 
     fig, axes = plt.subplots(figsize=figsize, nrows=1, ncols=2, sharey=True)
     title = f'Confidence Intervals for {dataset_name} Dataset Grouped by {group_name.capitalize()}'
@@ -142,46 +147,55 @@ def plot_confidence_intervals_train_and_test(train_dict_of_dfs,
     # fig.suptitle(title, fontsize=fontsize)
 
     # Plot the training intervals on the left
-    for group_id, ((p, eps), n) in train_ci_dict.items():
+    for idx, (group_id, ((p, eps), n)) in enumerate(train_data_sorted):
         # print(f'p: {p}, eps: {eps:.4f}, n: {n}')
-        axes[0].errorbar(y=[p], yerr=eps, x=[group_id], markersize=12,
+        axes[0].errorbar(y=[p], yerr=eps, x=[idx], markersize=12,
                          capsize=12, fmt='o-', label=str(group_id) + f'(n = {n})')
 
-    # axes[0].xaxis.set_major_locator(ticker.MultipleLocator(tick_spacing))
     axes[0].set_title('Train')
+    axes[0].xaxis.set_major_locator(ticker.MultipleLocator(tick_spacing))
+    axes[0].set_xticks(range(n_groups), labels=x_ticklabels)
+    axes[0].tick_params(axis='x', labelrotation=90)
+
     if use_legend:
         axes[0].legend()
     if x_ticklabels:
         axes[0].set_xticks(range(n_groups), labels=x_ticklabels)
 
     # Plot the intervals for test on the right
-    for group_id, ((p, eps), n) in test_ci_dict.items():
+    for idx, (group_id, ((p, eps), n)) in enumerate(test_data_sorted):
         # print(f'p: {p}, eps: {eps:.4f}, n: {n}')
-        axes[1].errorbar(y=[p], yerr=eps, x=[group_id], markersize=12,
+        axes[1].errorbar(y=[p], yerr=eps, x=[idx], markersize=12,
                          capsize=12, fmt='o-', label=str(group_id) + f'(n = {n})')
 
     axes[1].set_title('Test')
-    # axes[1].xaxis.set_major_locator(ticker.MultipleLocator(tick_spacing))
+    axes[1].tick_params(axis='x', labelrotation=90)
+    axes[1].xaxis.set_major_locator(ticker.MultipleLocator(tick_spacing))
+    axes[1].set_xticks(range(n_groups), labels=x_ticklabels)
     if use_legend:
         axes[1].legend()
-    if x_ticklabels:
-        axes[1].set_xticks(range(n_groups), labels=x_ticklabels)
+
+    # Make sure values are bounded between 0 and 1
+    ymin_0, ymax_0 = axes[0].get_ylim()
+    ymin_1, ymax_1 = axes[1].get_ylim()
+    axes[0].set_ylim(max(0, min(ymin_0, ymin_1)), min(1, max(ymax_0, ymax_1)))
 
     plt.tight_layout()
-    # plt.set_cmap('colorblind')
     plt.show()
 
 
 def plot_confidence_intervals(dict_of_dfs,
                               group_name,
                               dataset_name,
-                              x_ticklabels=None,
                               use_legend=True,
                               figsize=(12, 6),
                               fontsize=16,
                               tick_spacing=1):
     """
     Plots confidence intervals from each subgroup given a df with the columns: 'group', 'correct_count', 'total_count'
+
+    ci_dict maps a group_name to a tuple ((p, eps), n) whose two values are another value defining the CI and the
+    value n denoting the number of instances.
     """
 
     df = dict_of_dfs[group_name]
@@ -192,24 +206,48 @@ def plot_confidence_intervals(dict_of_dfs,
     fig.suptitle(title, fontsize=fontsize)
     # fig.suptitle(title, fontsize=fontsize)
 
-    # Plot the training intervals on the left
-    for group_id, ((p, eps), n) in ci_dict.items():
+    # Sorted list with entries of the form (group_id, ((p, eps), n)) sorted by values of p
+    full_data_sorted = sorted(ci_dict.items(), key=lambda x: x[1][0][0])
+    # The tick labels are simply the group_ids
+    x_ticklabels = [entry[0] for entry in full_data_sorted]
+    for idx, (group_id, ((p, eps), n)) in enumerate(full_data_sorted):
         # print(f'p: {p}, eps: {eps:.4f}, n: {n}')
-        ax.errorbar(y=[p], yerr=eps, x=[group_id], markersize=12,
+        ax.errorbar(y=[p], yerr=eps, x=[idx], markersize=12,
                          capsize=12, fmt='o-', label=str(group_id) + f'(n = {n})')
 
+    ax.tick_params(axis='x', labelrotation=90)
     ax.xaxis.set_major_locator(ticker.MultipleLocator(tick_spacing))
+    ax.set_xticks(range(n_groups), labels=x_ticklabels)
     if use_legend:
         ax.legend()
-    if x_ticklabels:
-        ax.set_xticks(range(n_groups), labels=x_ticklabels)
+
+    # Make sure values are bounded between 0 and 1
+    ymin, ymax = ax.get_ylim()
+    ax.set_ylim(max(0, ymin), min(1, ymax))
 
     plt.tight_layout()
     # plt.set_cmap('colorblind')
     plt.show()
 
 
-def plot_confidence_intervals_from_df(df_with_preds, label_col, pred_col, dataset_name, group_name, x_ticklabels=None,
+def plot_intersectional_confidence_intervals_from_df(df_with_preds, label_col, pred_col, dataset_name, group_1, group_2,
+                                                     use_legend=True, figsize=(12, 6), fontsize=16, tick_spacing=1):
+
+    """
+    Plots confidence for overlapping groups
+    """
+
+    intersect_group_name = group_1 + '-' + group_2
+    # Copy the df to avoid augmenting the input dataframe in place
+    new_df = df_with_preds.copy()
+    new_df[intersect_group_name] = df_with_preds[group_1].map(capwords) + '-' + df_with_preds[group_2].map(capwords)
+
+    # Use existing function on this new group column
+    plot_confidence_intervals_from_df(new_df, label_col, pred_col, dataset_name, intersect_group_name,
+                                      use_legend, figsize, fontsize, tick_spacing)
+
+
+def plot_confidence_intervals_from_df(df_with_preds, label_col, pred_col, dataset_name, group_name,
                                       use_legend=True, figsize=(12, 6), fontsize=16, tick_spacing=1):
     """
     Plots confidence intervals directly from dataframe.
@@ -218,13 +256,13 @@ def plot_confidence_intervals_from_df(df_with_preds, label_col, pred_col, datase
     dict_of_dfs = eval_model_on_groups(df=df_with_preds, label_col=label_col, pred_col=pred_col,
                                        dataset_name=dataset_name, group_names=[group_name], print_output=False)
 
-    plot_confidence_intervals(dict_of_dfs, group_name, dataset_name, x_ticklabels, use_legend, figsize,
+    plot_confidence_intervals(dict_of_dfs, group_name, dataset_name, use_legend, figsize,
                               fontsize, tick_spacing)
 
 
 def plot_confidence_intervals_from_df_train_and_test(train_df_with_preds, test_df_with_preds,
                                                      label_col, pred_col, dataset_name, group_name,
-                                                     x_ticklabels=None, use_legend=True, figsize=(12, 6),
+                                                     use_legend=True, figsize=(12, 6),
                                                      fontsize=16, tick_spacing=1):
     """
     Plots confidence intervals directly from dataframe.
@@ -236,7 +274,7 @@ def plot_confidence_intervals_from_df_train_and_test(train_df_with_preds, test_d
                                             dataset_name=dataset_name, group_names=[group_name], print_output=False)
 
     plot_confidence_intervals_train_and_test(train_dict_of_dfs, test_dict_of_dfs, group_name, dataset_name,
-                                             x_ticklabels, use_legend, figsize, fontsize, tick_spacing)
+                                             use_legend, figsize, fontsize, tick_spacing)
 
 
 def compute_wald_intervals(df):

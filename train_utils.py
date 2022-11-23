@@ -8,6 +8,19 @@ from models import MLP, ConvNet
 from dataset_utils import create_dataloader_from_df
 
 
+def train_baseline_model(df):
+    
+    # Use these network size and seed initializations in the baseline model.
+    n_epochs = 3
+    hidden_dim = 10
+    data_shuffle_seed = 0
+    model_weight_init_seed = 0
+
+    return train_model(df=df, img_col='img', label_col='label', colored=True,
+                         dataset_name='train_set', net_type='MLP', n_epochs=n_epochs, hidden_dim=hidden_dim,
+                         data_shuffle_seed=data_shuffle_seed, model_weight_init_seed=model_weight_init_seed)                        
+
+
 def train_model(df, img_col, label_col, colored, dataset_name, net_type, n_epochs, hidden_dim,
                 data_shuffle_seed, model_weight_init_seed):
     """

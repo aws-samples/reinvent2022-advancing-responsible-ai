@@ -6,7 +6,19 @@ import torch
 from torchvision import datasets, transforms
 
 from image_utils import convert_image_from_gray_to_color_by_idx, threshold_grayscale_image, \
-    convert_image_from_gray_to_color_by_name
+    convert_image_from_gray_to_color_by_name, add_sp_noise
+
+
+def create_record_from_im_and_label(im, label):
+    curve_dict = {}
+
+    img = threshold_grayscale_image(im)
+    label = label
+    digit = get_digit(label)
+    parity = get_parity(label)
+    magnitude = get_magnitude(label)
+    curve = get_curve(label)
+    return img, label, digit, parity, magnitude, curve
 
 
 def create_mnist_tables():
@@ -22,13 +34,13 @@ def create_mnist_tables():
     test_mnist = datasets.mnist.MNIST(root, train=False, download=True, transform=None, target_transform=None)
 
     train_df = pd.DataFrame.from_records(
-        ((threshold_grayscale_image(im), label, label, label % 2, label // 4) for (im, label) in train_mnist),
-        columns=['img', 'label', 'digit', 'parity', 'magnitude']
+        (create_record_from_im_and_label(im, label) for (im, label) in train_mnist),
+        columns=['img', 'label', 'digit', 'parity', 'magnitude', 'curve']
     )
 
     test_df = pd.DataFrame.from_records(
-        ((threshold_grayscale_image(im), label, label, label % 2, label // 4) for (im, label) in test_mnist),
-        columns=['img', 'label', 'digit', 'parity', 'magnitude']
+        (create_record_from_im_and_label(im, label) for (im, label) in test_mnist),
+        columns=['img', 'label', 'digit', 'parity', 'magnitude', 'curve']
     )
 
     return train_df, test_df
@@ -70,7 +82,7 @@ def _color_data_stochastically_by_label(df, img_col, label_col, p, random_seed=0
     return colored_df
 
 
-def bicolor_data_stocastically_by_label(df, img_col, label_col, p, colorA='red', colorB='green', random_seed=0):
+def bicolor_data_stocastically_by_label(df, img_col, label_col, p, colorA='orange', colorB='blue', random_seed=0):
     """
     Create a copy of the DataFrame df where the entire set is 
     colored on a two-color scheme, using the input float p. 
@@ -147,13 +159,12 @@ def color_mnist_data_with_dict_per_digit(df, color_probs, random_seed=0):
             colored_img = convert_image_from_gray_to_color_by_name(img, color)
             # digit_df.at[i, 'img'] = colored_img
             colors.append(color)
-            records.append((colored_img, record.label, record.digit, record.parity, record.magnitude, color,
-                            f'{record.digit}_{color}'))
+            records.append((colored_img, record.label, record.digit, record.parity, record.magnitude, record.curve,
+                            color))
         # Add the color column and add this df to our list
 
         new_df = pd.DataFrame.from_records(records,
-                                           columns=['img', 'label', 'digit', 'parity', 'magnitude', 'color',
-                                                    'digit_and_color'])
+                                           columns=['img', 'label', 'digit', 'parity', 'magnitude', 'curve', 'color'])
         digit_dfs.append(new_df)
         # digit_df['colors'] = colors
         # digit_dfs.append(digit_df)
@@ -161,7 +172,7 @@ def color_mnist_data_with_dict_per_digit(df, color_probs, random_seed=0):
     return pd.concat(digit_dfs)
 
 
-def resample_dataset(df, group_col, group_props, random_seed=0):
+def resample_dataset(df, group_col, group_props, group_name_to_index_dict, random_seed=0):
     """
     Returns a new dataframe such that for each unique subgroup in group column (which should be indexed 0, 1, n_grps-1)
     the resulting dataframe only has group_prop[i] proportion of rows (randomly selected) for members of group i.
@@ -177,50 +188,48 @@ def resample_dataset(df, group_col, group_props, random_seed=0):
     subsampled_sizes = group_weights * min(group_sizes)
     # Concatenate the samples from each group individually
     random_state = np.random.RandomState(random_seed)
-    return pd.concat(dff.sample(n=int(subsampled_sizes[i]), random_state=random_state)
+    # TODO: make this work when the group values are not integers anymore...
+    return pd.concat(dff.sample(n=int(subsampled_sizes[group_name_to_index_dict[i]]), random_state=random_state)
                      for i, dff in df.groupby(group_col))
 
 
-def magnitudeOf(row, value_col='label'):  
-    if row[value_col] > -1 and row[value_col] <= 3:
-        return 'small'
-    elif row[value_col] > 3 and row[value_col] <= 6:
-        return 'med'
-    return 'large'
+def get_digit(label):
+    """
+    Returns the string of the digit group for the label
+    """
+    return str(label)
 
 
-def parityOf(row, value_col='label'):
-    if row[value_col] % 2 == 0:
-        return 'even'
-    else:
-        return 'odd'
+def get_parity(label):
+    """
+    Returns the string of the parity group for the label
+    """
+    return 'odd' if label % 2 else 'even'
 
 
-def curveOf(row, value_col='label'):
+def get_magnitude(label):
+    """
+    Returns the string of the magnitude group for the label
+    """
+    magnitude_dict = {0: 'small', 1: 'small', 2: 'small', 3: 'small', 4: 'medium', 5: 'medium', 6: 'medium',
+                      7: 'large', 8: 'large', 9: 'large'}
+    return magnitude_dict[label]
+
+
+def get_curve(label):
+    """
+    Returns the string of the curve group for the label
+    """
     curves = [3, 8]
     lines = [1, 4, 7]
-    if row[value_col] in curves:
+    if label in curves:
         return 'curves'
-    elif row[value_col] in lines:
+    elif label in lines:
         return 'lines'
     else:
-        return 'mix'
+        return 'neutral'
 
 
-def add_numerical_attributes(df, value_col='label'):
-    """
-    Create a copy of the DataFrame pd that has an additional column 'parity' 
-    The value of 'parity' is 'even' for numbers where pd[value_col] % 2 == 0, and 'odd' otherwise.
-    Return the copy with new column attached.
-    """
-    result_df = df.copy()
-    result_df['magnitude'] = result_df.apply(lambda row: magnitudeOf(row, value_col), axis=1)
-    result_df['parity'] = result_df.apply(lambda row: parityOf(row, value_col), axis=1)
-    result_df['curve'] = result_df.apply(lambda row: curveOf(row, value_col), axis=1)
-
-    return result_df
-
-    
 def create_starting_data():
     ''' 
     Download MNIST dataset and resample, so that the workshop can start from the biased version
@@ -240,22 +249,46 @@ def create_starting_data():
     
     Return train_data and test_data
     '''
-    # Download mnist: default distribution
-    train_data, test_data = create_mnist_tables() 
+    # Download mnist: default distribution  NOTE: this includes parity, magnitude, and curve
+    train_data, test_data = create_mnist_tables()
 
     # Add color distribution .8 red / .2 green 
-    colorful_train_data = bicolor_data_stocastically_by_label(train_data, 'img', 'label', 0.8, colorA='red', colorB='green' )
-    colorful_test_data = bicolor_data_stocastically_by_label(test_data, 'img', 'label', 0.8, colorA='red', colorB='green' )
-
-    # Add parity, magnitude, and curve
-    num_colorful_train_data = add_numerical_attributes(colorful_train_data)
-    num_colorful_test_data = add_numerical_attributes(colorful_test_data)
+    num_colorful_train_data = bicolor_data_stocastically_by_label(train_data, 'img', 'label', 0.8, colorA='orange',
+                                                              colorB='blue')
+    num_colorful_test_data = bicolor_data_stocastically_by_label(test_data, 'img', 'label', 0.8, colorA='orange',
+                                                             colorB='blue' )
 
     # Resample so that 3's and 8's are under-represented
     sampled_num_colorful_train_data = resample_dataset(num_colorful_train_data, group_col='digit',
-                                            group_props=[1, 1, 1, 0.3, 1, 1, 0.3, 1, 1, 1])
+                                                       group_props=[1, 1, 1, 0.3, 1, 1, 0.3, 1, 1, 1],
+                                                       group_name_to_index_dict={str(i): i for i in range(10)}
+                                                       )
 
     return sampled_num_colorful_train_data, num_colorful_test_data
+
+
+def create_augmented_data():
+    '''
+    Create starting dataset without downsampling.
+
+    Simulates the case where we gathered additional data for under-represented groups.
+    '''
+    # Download mnist: default distribution  NOTE: this includes parity, magnitude, and curve
+    train_data, test_data = create_mnist_tables()
+
+    # Add color distribution .8 red / .2 green 
+    num_colorful_train_data = bicolor_data_stocastically_by_label(train_data, 'img', 'label', 0.8, colorA='orange',
+                                                              colorB='blue')
+    return num_colorful_train_data
+
+
+def get_val2(df):
+    '''
+    Create a version of val_data where the 4's have salt-and-peper noise
+    '''
+    val2_df = df.copy()
+    val2_df['img'] = val2_df.apply(lambda row: add_sp_noise(row['img'], 0.02) if row['digit'] == '4' else row['img'], axis=1)
+    return val2_df
 
 
 def create_dataloader_from_df(df, img_col, label_col, dataset_name, data_shuffle_seed, train=True):
